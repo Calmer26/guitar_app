@@ -199,6 +199,41 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [TensorFlow.js](https://tensorflow.org/js) for machine learning models
 - The music education community for inspiration and feedback
 
+## 🌐 Live Demo
+
+**Try it now:** https://[USERNAME].github.io/guitar4/
+
+*(Replace [USERNAME] with actual GitHub username)*
+
+## 🚀 Quick Start
+
+### Online (Recommended)
+Visit the live demo above - no installation needed!
+
+### Local Development
+
+```bash
+git clone https://github.com/[USERNAME]/guitar4.git
+cd guitar4
+npm install
+npm start
+```
+
+Open http://localhost:8000
+
+## 📦 Deployment
+
+This app is deployed on GitHub Pages. Any push to `main` branch triggers automatic deployment.
+
+### Deploy Updates
+```bash
+git add .
+git commit -m "feat: Your feature description"
+git push origin main
+```
+
+GitHub Pages rebuilds within 1-3 minutes.
+
 ## Support
 
 - [Documentation](docs/)
