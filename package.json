@@ -1,0 +1,36 @@
+{
+  "name": "guitar4",
+  "version": "0.1.0",
+  "description": "Browser-based guitar training application",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --require ./src/tests/setup.js --test src/tests/unit/**/*.test.js",
+    "test:coverage": "node --require ./src/tests/setup.js --test --experimental-test-coverage src/tests/unit/**/*.test.js",
+    "lint:rules": "node scripts/validate-governance.js",
+    "validate": "npm run lint:rules && npm test",
+    "validate:exercise": "node scripts/validate-exercise-xml.js",
+    "validate:exercises": "for file in examples/exercise/*.xml; do node scripts/validate-exercise-xml.js \"$file\" || exit 1; done",
+    "test:exercises": "npx playwright test src/tests/e2e",
+    "test:exercises:headed": "npx playwright test src/tests/e2e --headed",
+    "test:scoring": "npx playwright test src/tests/e2e/scoring-analysis.test.js",
+    "test:full-validation": "./scripts/test-all-exercises.sh"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs": "^3.18.0",
+    "express": "^4.18.2",
+    "jsdom": "^27.1.0",
+    "lodash": "^4.17.21",
+    "papaparse": "^5.4.1",
+    "tone": "^14.7.77"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@types/lodash": "^4.14.191",
+    "@types/papaparse": "^5.3.7",
+    "@xmldom/xmldom": "^0.8.11"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

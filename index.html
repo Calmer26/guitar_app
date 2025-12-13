@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Guitar4 - Browser-based guitar training application with real-time pitch detection and notation rendering">
+  <title>Guitar4 - Guitar Training App</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Load Tone.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+  <!-- Load OpenSheetMusicDisplay from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.9.2/build/opensheetmusicdisplay.min.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <h1 class="app-title">Guitar4</h1>
+    <div class="header-center">
+      <div id="notification" class="notification hidden">
+        <div class="notification-content">
+          <span class="notification-message"></span>
+          <button class="notification-close">×</button>
+        </div>
+      </div>
+    </div>
+    <div class="header-controls">
+      <button id="activateAudio" class="btn btn-primary">
+        Start Audio Context
+      </button>
+      <div id="audioStatus" class="audio-status">
+        <span class="status-indicator status-inactive"></span>
+        <span class="status-text">Audio Inactive</span>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tab-navigation">
+    <button class="tab-btn active" data-tab="practice">Practice</button>
+    <button class="tab-btn" data-tab="tuner">Tuner</button>
+    <button class="tab-btn" data-tab="lessons">Lessons</button>
+    <button class="tab-btn" data-tab="settings">Settings</button>
+  </nav>
+
+  <main class="app-main">
+    <!-- Practice Tab -->
+    <section id="practice-tab" class="tab-content active">
+      <div class="notation-section">
+        <div id="notation-container" class="notation-container">
+          <div class="loading-placeholder">
+            <p>Load an exercise to display notation</p>
+            <input type="file" id="exerciseFilePractice" accept=".xml,.musicxml" class="file-input">
+            <label for="exerciseFilePractice" class="btn btn-primary">
+              📁 Upload MusicXML File
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="practice-controls">
+        <div class="playback-controls">
+          <button id="playBtn" class="btn btn-play" disabled>
+            ▶ Play
+          </button>
+          <button id="pauseBtn" class="btn btn-pause" disabled>
+            ⏸ Pause
+          </button>
+          <button id="stopBtn" class="btn btn-stop" disabled>
+            ⏹ Stop
+          </button>
+        </div>
+
+        <div class="tempo-control">
+          <label for="tempoSlider">Tempo:</label>
+          <input type="range" id="tempoSlider" min="60" max="200" value="120" disabled>
+          <span id="tempoValue">120 BPM</span>
+        </div>
+
+        <div class="instrument-mode">
+          <label for="instrumentMode">Mode:</label>
+          <select id="instrumentMode" disabled>
+            <option value="synth">Synthesized</option>
+            <option value="samples">Audio Samples</option>
+          </select>
+        </div>
+
+        <div class="metronome-control">
+          <label>
+            <input type="checkbox" id="metronomeToggle" disabled>
+            Metronome
+          </label>
+        </div>
+
+        <div class="audio-controls">
+          <label for="instrumentSelect">Instrument:</label>
+          <select id="instrumentSelect">
+            <option value="acoustic">Acoustic Guitar</option>
+            <option value="piano">Piano</option>
+            <option value="cello">Cello</option>
+          </select>
+          
+          <label for="volumeSlider">Volume:</label>
+          <input type="range" id="volumeSlider" min="0" max="100" value="70">
+          <span id="volumeValue">70%</span>
+          
+          <label for="metronomeVolumeSlider">Metronome Vol:</label>
+          <input type="range" id="metronomeVolumeSlider" min="0" max="100" value="50">
+          <span id="metronomeVolumeValue">50%</span>
+        </div>
+      </div>
+
+      <div class="practice-microphone">
+        <label>
+          <input type="checkbox" id="practice-microphone-toggle">
+          🎤 Enable Microphone for Practice
+        </label>
+        <div id="practice-mic-status" class="mic-status">Microphone disabled</div>
+        <div id="practice-pitch-indicator" class="pitch-indicator">
+          <span id="practice-current-note">--</span>
+          <span id="practice-frequency">-- Hz</span>
+      <!-- NEW: Audio Latency Calibration Section -->
+      <div class="calibration-section">
+        <h3>Audio Calibration</h3>
+        <div class="calibration-info">
+          <div class="calibration-item">
+            <span class="calibration-label">Current Latency:</span>
+            <span id="calibration-latency-display" class="calibration-value">200ms</span>
+          </div>
+          <div class="calibration-item">
+            <span class="calibration-label">Status:</span>
+            <span id="calibration-status" class="calibration-status default">Default</span>
+          </div>
+        </div>
+        <div class="calibration-controls">
+          <button id="calibrate-latency-btn" class="btn btn-secondary">
+            🔧 Calibrate Latency
+          </button>
+          <button id="reset-calibration-btn" class="btn btn-secondary" disabled>
+            🔄 Reset to Default
+          </button>
+        </div>
+        <div class="calibration-description">
+          <p>Calibrate audio latency to improve timing accuracy. 
+             Play a synthetic tone and measure detection delay.</p>
+        </div>
+      </div>
+          <span id="practice-cents">0 cents</span>
+        </div>
+      </div>
+
+      <div class="score-display">
+        <h3>Performance Score</h3>
+        <div class="score-metrics">
+          <div class="metric">
+            <span class="metric-label">Accuracy:</span>
+            <span class="metric-value" id="accuracyScore">-</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Timing:</span>
+            <span class="metric-value" id="timingScore">-</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Notes:</span>
+            <span class="metric-value" id="notesScore">-</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="real-time-feedback" class="real-time-feedback">
+        <div id="feedback-current-note" class="feedback-note">Ready to practice</div>
+        <div id="feedback-status" class="feedback-status">Play a note to get started</div>
+      </div>
+
+      <div id="analysis-report" class="analysis-report card" style="display: none;">
+        <div class="analysis-report-header">
+          <h3 class="analysis-report-title">
+            <span class="analysis-icon">📊</span>
+            Detailed Practice Analysis
+          </h3>
+          <button id="close-analysis-btn" class="close-analysis-btn" aria-label="Close analysis report">
+            ×
+          </button>
+        </div>
+        
+        <div class="analysis-report-content">
+          <div class="analysis-table-container">
+            <table class="analysis-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Expected</th>
+                  <th>Time</th>
+                  <th>Detected</th>
+                  <th>Raw Time</th>
+                  <th>Adj Time</th>
+                  <th>Δ Timing</th>
+                  <th>Pitch</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="analysis-table-body">
+                <!-- Dynamic content will be inserted here -->
+              </tbody>
+            </table>
+          </div>
+          
+          <div class="analysis-summary">
+            <div class="summary-section">
+              <h4 class="summary-title">🎯 Performance Summary</h4>
+              <div class="summary-metrics" id="analysis-summary-content">
+                <!-- Dynamic summary content will be inserted here -->
+              </div>
+            </div>
+            
+            <div class="summary-section">
+              <h4 class="summary-title">💡 Recommendations</h4>
+              <div class="recommendations-list" id="analysis-recommendations">
+                <!-- Dynamic recommendations will be inserted here -->
+              </div>
+            </div>
+            
+            <div class="summary-section">
+              <h4 class="summary-title">🔧 System Info</h4>
+              <div class="system-info" id="analysis-system-info">
+                <!-- Dynamic system info will be inserted here -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tuner Tab -->
+    <section id="tuner-tab" class="tab-content">
+      <div class="tuner-microphone-controls">
+        <label>
+          <input type="checkbox" id="tuner-microphone-toggle">
+          🎤 Enable Microphone for Tuner
+        </label>
+        <div id="tuner-mic-status" class="mic-status">Microphone disabled</div>
+      </div>
+      
+      <div class="tuner-container">
+        <!-- Frequency Display -->
+        <div class="tuner-frequency">
+          <span id="tuner-freq-value">--</span>
+          <span class="tuner-freq-unit">Hz</span>
+        </div>
+        
+        <!-- Note Name Display -->
+        <div class="tuner-note-name" id="tuner-note-name">--</div>
+        
+        <!-- Needle Indicator -->
+        <div class="tuner-gauge">
+          <svg width="300" height="150" viewBox="0 0 300 150">
+            <!-- Gauge background -->
+            <path d="M 50 125 A 100 100 0 0 1 250 125" 
+                  stroke="#E0E0E0" 
+                  stroke-width="20" 
+                  fill="none"/>
+            
+            <!-- Green zone -->
+            <path d="M 140 125 A 100 100 0 0 1 160 125" 
+                  stroke="#00C853" 
+                  stroke-width="20" 
+                  fill="none"/>
+            
+            <!-- Tick marks -->
+            <line x1="150" y1="25" x2="150" y2="35" stroke="#666" stroke-width="2"/>
+            <line x1="100" y1="50" x2="105" y2="58" stroke="#666" stroke-width="1"/>
+            <line x1="200" y1="50" x2="195" y2="58" stroke="#666" stroke-width="1"/>
+            
+            <!-- Needle (rotates) -->
+            <g id="tuner-needle" transform="rotate(0 150 125)">
+              <line x1="150" y1="125" x2="150" y2="40" 
+                    stroke="#000" 
+                    stroke-width="3" 
+                    stroke-linecap="round"/>
+              <circle cx="150" cy="125" r="8" fill="#000"/>
+            </g>
+          </svg>
+        </div>
+        
+        <!-- Cents Display -->
+        <div class="tuner-cents">
+          <span id="tuner-cents-value">0</span>
+          <span class="tuner-cents-unit">cents</span>
+        </div>
+        
+        <!-- Color Indicator -->
+        <div class="tuner-color-indicator" id="tuner-color-indicator"></div>
+        
+        <!-- Confidence Bar (optional) -->
+        <div class="tuner-confidence">
+          <label>Confidence:</label>
+          <div class="confidence-bar">
+            <div id="tuner-confidence-fill" class="confidence-fill"></div>
+          </div>
+        </div>
+        
+        <!-- Settings -->
+        <div class="tuner-settings">
+          <label>
+            Reference A4:
+            <select id="tuner-reference-select">
+              <option value="432">432 Hz</option>
+              <option value="440" selected>440 Hz</option>
+              <option value="442">442 Hz</option>
+              <option value="444">444 Hz</option>
+            </select>
+          </label>
+          
+          <label>
+            Smoothing:
+            <input type="range" 
+                   id="tuner-smoothing-slider" 
+                   min="0" 
+                   max="99" 
+                   value="20" 
+                   step="1"/>
+            <span id="tuner-smoothing-value">0.20</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- Lessons Tab -->
+    <section id="lessons-tab" class="tab-content">
+      <div class="lessons-content">
+        <h3>Exercises & Lessons</h3>
+        
+        <div class="file-upload-section">
+          <h4>Upload Exercise</h4>
+          <div class="upload-area">
+            <input type="file" id="exerciseFileLessons" accept=".xml,.musicxml" class="file-input">
+            <label for="exerciseFileLessons" class="file-label">
+              <span class="upload-icon">📁</span>
+              <span class="upload-text">Choose MusicXML file or drag here</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="sample-exercises">
+          <h4>Sample Exercises</h4>
+          <div class="exercise-list" id="exerciseList">
+            <div class="exercise-item" data-file="assets/exercises/twinkle2.xml">
+              <div class="exercise-info">
+                <h5>Twinkle Twinkle Little Star</h5>
+                <p>Beginner • 4/4 • 120 BPM</p>
+              </div>
+              <button class="btn btn-sm btn-primary">Load</button>
+            </div>
+            <div class="exercise-item" data-file="assets/exercises/chord-exercise.xml">
+              <div class="exercise-info">
+                <h5>Basic Chords</h5>
+                <p>Beginner • 4/4 • 80 BPM</p>
+              </div>
+              <button class="btn btn-sm btn-primary">Load</button>
+            </div>
+            <div class="exercise-item" data-file="assets/exercises/long-form.xml">
+              <div class="exercise-info">
+                <h5>Long Form Exercise</h5>
+                <p>Intermediate • 4/4 • 100 BPM</p>
+              </div>
+              <button class="btn btn-sm btn-primary">Load</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings Tab -->
+    <section id="settings-tab" class="tab-content">
+      <div class="settings-content">
+        <h3>Settings</h3>
+        
+        <div class="settings-section">
+          <h4>Audio Settings</h4>
+          <div class="setting-item">
+            <label for="settings-instrument">Instrument:</label>
+            <select id="settings-instrument">
+              <option value="acoustic">Acoustic Guitar</option>
+              <option value="piano">Piano</option>
+              <option value="cello">Cello</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label for="settings-mode">Playback Mode:</label>
+            <select id="settings-mode">
+              <option value="synth">Synthesized</option>
+              <option value="samples">Audio Samples</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label for="settings-volume">Master Volume:</label>
+            <input type="range" id="settings-volume" min="0" max="100" value="75">
+            <span class="value-display" id="settings-volume-value">75%</span>
+          </div>
+
+          <div class="setting-item">
+            <label for="settings-metronome-vol">Metronome Volume:</label>
+            <input type="range" id="settings-metronome-vol" min="0" max="100" value="50">
+            <span class="value-display" id="settings-metronome-vol-value">50%</span>
+          </div>
+
+          <div class="setting-item">
+            <label for="manual-latency">Manual Latency (ms):</label>
+            <div class="input-group">
+              <input type="number" id="manual-latency" min="0" max="500" step="5" placeholder="Auto">
+              <button id="reset-manual-latency" class="btn btn-small">Reset</button>
+            </div>
+            <div class="setting-description">
+              Override automatic latency calibration (0-500ms). Leave empty to use calibrated value.
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4>Tuner Settings</h4>
+          <div class="setting-item">
+            <label for="settings-reference">Reference Pitch (A4):</label>
+            <select id="settings-reference">
+              <option value="432">432 Hz</option>
+              <option value="440" selected>440 Hz</option>
+              <option value="442">442 Hz</option>
+              <option value="444">444 Hz</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label for="settings-smoothing">Smoothing Factor:</label>
+            <input type="range" id="settings-smoothing" min="0" max="99" value="20" step="1">
+            <span class="value-display" id="settings-smoothing-value">20</span>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4>Practice Settings</h4>
+          <div class="setting-item">
+            <label for="settings-difficulty">Difficulty Level:</label>
+            <select id="settings-difficulty">
+              <option value="EASY">Easy (100¢, 200ms tolerance)</option>
+              <option value="NORMAL" selected>Normal (50¢, 100ms tolerance)</option>
+              <option value="HARD">Hard (25¢, 50ms tolerance)</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label for="settings-analyzer-smoothing">Pitch Smoothing:</label>
+            <input type="range" id="settings-analyzer-smoothing" min="0" max="1" value="0.5" step="0.05">
+            <span class="value-display" id="settings-analyzer-smoothing-value">0.50</span>
+            <div class="setting-description">
+              Reduces false negatives by filtering rapid pitch fluctuations. Higher values = more smoothing (50-200ms window).
+            </div>
+          </div>
+
+          <div class="setting-item">
+            <label>
+              <input type="checkbox" id="settings-use-xml-tempo">
+              Use tempo from MusicXML files
+            </label>
+            <div class="setting-description">
+              When enabled, the tempo slider will automatically update to match the tempo specified in loaded MusicXML files.
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4>Data Management</h4>
+          <div class="setting-item">
+            <button id="export-settings" class="btn btn-secondary">Export Settings</button>
+            <button id="reset-settings" class="btn btn-secondary">Reset to Defaults</button>
+          </div>
+          <div class="setting-item">
+            <button id="clear-history" class="btn btn-danger">Clear Performance History</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+
+
+  <!-- Scripts -->
+  <script type="module">
+    import './src/app.js';
+  </script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN"
+  "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <work>
+    <work-title>Open Horizons</work-title>
+  </work>
+  <part-list>
+    <!-- Guitar -->
+    <score-part id="Guitar">
+      <part-name>Guitar</part-name>
+      <score-instrument id="Guitar-Instr">
+        <instrument-name>Acoustic Guitar</instrument-name>
+      </score-instrument>
+      <midi-instrument id="Guitar-Instr">
+        <midi-channel>1</midi-channel>
+        <midi-program>25</midi-program>
+      </midi-instrument>
+    </score-part>
+    <!-- Piano -->
+    <score-part id="Piano">
+      <part-name>Piano</part-name>
+      <score-instrument id="Piano-Instr">
+        <instrument-name>Acoustic Grand Piano</instrument-name>
+      </score-instrument>
+      <midi-instrument id="Piano-Instr">
+        <midi-channel>2</midi-channel>
+        <midi-program>1</midi-program>
+      </midi-instrument>
+    </score-part>
+  </part-list>
+
+  <!-- Guitar Part -->
+  <part id="Guitar">
+    <measure number="1">
+      <attributes>
+        <divisions>2</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+        <clef number="1"><sign>G</sign><line>2</line></clef>
+        <clef number="2"><sign>TAB</sign><line>5</line></clef>
+        <staff-details number="2">
+          <staff-lines>6</staff-lines>
+          <staff-tuning line="1"><tuning-step>E</tuning-step><tuning-octave>2</tuning-octave></staff-tuning>
+          <staff-tuning line="2"><tuning-step>A</tuning-step><tuning-octave>2</tuning-octave></staff-tuning>
+          <staff-tuning line="3"><tuning-step>D</tuning-step><tuning-octave>3</tuning-octave></staff-tuning>
+          <staff-tuning line="4"><tuning-step>G</tuning-step><tuning-octave>3</tuning-octave></staff-tuning>
+          <staff-tuning line="5"><tuning-step>B</tuning-step><tuning-octave>3</tuning-octave></staff-tuning>
+          <staff-tuning line="6"><tuning-step>E</tuning-step><tuning-octave>4</tuning-octave></staff-tuning>
+        </staff-details>
+      </attributes>
+      <direction placement="above">
+        <direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>80</per-minute></metronome></direction-type>
+        <sound tempo="80"/>
+      </direction>
+
+      <!-- Guitar melody: open E, B, G -->
+      <note>
+        <pitch><step>E</step><octave>4</octave></pitch>
+        <duration>2</duration><type>eighth</type><staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>B</step><octave>3</octave></pitch>
+        <duration>2</duration><type>eighth</type><staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>G</step><octave>3</octave></pitch>
+        <duration>2</duration><type>eighth</type><staff>1</staff>
+      </note>
+      <note>
+        <pitch><step>B</step><octave>3</octave></pitch>
+        <duration>2</duration><type>eighth</type><staff>1</staff>
+      </note>
+    </measure>
+    <!-- repeat similar patterns in further measures -->
+  </part>
+
+  <!-- Piano Part -->
+  <part id="Piano">
+    <!-- Piano plays whole note chords -->
+    <measure number="1">
+      <attributes>
+        <divisions>2</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <!-- C major chord -->
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>8</duration><type>whole</type>
+      </note>
+      <note>
+        <chord/><pitch><step>E</step><octave>4</octave></pitch>
+        <duration>8</duration><type>whole</type>
+      </note>
+      <note>
+        <chord/><pitch><step>G</step><octave>4</octave></pitch>
+        <duration>8</duration><type>whole</type>
+      </note>
+    </measure>
+    <!-- further measures: G, Am, F chords -->
+  </part>
+</score-partwise>
