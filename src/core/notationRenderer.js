@@ -54,16 +54,7 @@ class NotationRenderer extends EventEmitter {
     this.isRendering = false;
     this.currentExercise = null;
     this.lastHighlightedNotes = [];
-
-    // Cursor state
-    this.cursorEnabled = false;
-    this.totalCursorSteps = 0;
-    this.currentCursorStep = 0;
-
-    // Timeline → cursor step mapping
-    this.timelineToStepMap = new Map(); // noteId → cursor step index
-    this.stepToTimelineMap = new Map(); // cursor step → array of noteIds
-
+    
     // Performance monitoring
     this.renderStartTime = null;
   }
@@ -118,13 +109,13 @@ class NotationRenderer extends EventEmitter {
       await this.osmd.load(exercise.osmdInput);
       await this.osmd.render();
       
-      this.emit('render:progress', {
-        percent: 60,
-        stage: 'Initializing cursor mapping'
+      this.emit('render:progress', { 
+        percent: 60, 
+        stage: 'Building element map' 
       });
-
-      // Initialize cursor and build timeline → cursor step mapping
-      await this._initializeCursorMapping(exercise);
+      
+      // Build DOM element mapping
+      await this._buildElementMap(exercise);
       
       this.emit('render:progress', { 
         percent: 90, 
@@ -176,168 +167,52 @@ class NotationRenderer extends EventEmitter {
   }
 
   /**
-   * Initialize cursor and build timeline → cursor step mapping
-   *
-   * Based on osmd-audio-player's countAndSetIterationSteps() pattern
-   * https://cdn.jsdelivr.net/gh/ivine/osmd-audio-player@master/src/OSMDCursor.ts
-   *
+   * Build mapping of note IDs to DOM elements using OSMD cursor
+   * 
+   * @param {ExerciseJSON} exercise - Exercise data
    * @private
    */
-  async _initializeCursorMapping(exercise) {
+  async _buildElementMap(exercise) {
+    this.noteElementMap.clear();
+    
+    // Wait for SVG to be fully rendered
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
     try {
-      // Create and initialize cursor
+      // Store timeline for cursor control
+      this.cursorTimeline = exercise.timeline;
+      this.cursorIndex = 0;
+      
+
+      
+      // Initialize OSMD cursor
       if (!this.osmd.cursor) {
         this.osmd.cursor = new opensheetmusicdisplay.Cursor(
           this.osmd.container,
           this.osmd
         );
       }
-
+      
       this.osmd.cursor.show();
       this.osmd.cursor.reset();
-
-      Logger.log(Logger.INFO, 'NotationRenderer', 'Counting cursor steps...');
-
-      // Count total cursor steps (following osmd-audio-player pattern)
-      let stepCount = 0;
-      const stepToNotesMap = new Map();
-
-      // Iterate through all cursor positions
-      while (!this.osmd.cursor.iterator.EndReached) {
-        // Get current voice entries at this cursor position
-        const voiceEntries = this.osmd.cursor.iterator.CurrentVoiceEntries;
-
-        if (voiceEntries && voiceEntries.length > 0) {
-          const noteIds = [];
-
-          // Extract note information from voice entries
-          for (const voiceEntry of voiceEntries) {
-            if (voiceEntry && voiceEntry.Notes && voiceEntry.Notes.length > 0) {
-              // Match notes to timeline by timestamp and pitch
-              for (const graphicalNote of voiceEntry.Notes) {
-                const sourceNote = graphicalNote.sourceNote;
-
-                if (sourceNote && !sourceNote.IsRest) {
-                  // Find matching timeline note(s) by timestamp and pitch
-                  const matchingNotes = this._findTimelineNotesByVoiceEntry(
-                    exercise.timeline,
-                    sourceNote,
-                    voiceEntry
-                  );
-
-                  noteIds.push(...matchingNotes);
-                }
-              }
-            }
-          }
-
-          // Store mapping for this cursor step
-          if (noteIds.length > 0) {
-            stepToNotesMap.set(stepCount, noteIds);
-
-            // Build reverse mapping (noteId → step)
-            for (const noteId of noteIds) {
-              if (!this.timelineToStepMap.has(noteId)) {
-                this.timelineToStepMap.set(noteId, stepCount);
-              }
-            }
-          }
-        }
-
-        stepCount++;
-        this.osmd.cursor.next();
-      }
-
-      this.totalCursorSteps = stepCount;
-      this.stepToTimelineMap = stepToNotesMap;
+      
+      // Store cursor reference for highlighting
       this.cursorEnabled = true;
-
-      // Reset cursor to beginning
-      this.osmd.cursor.reset();
-      this.currentCursorStep = 0;
-
-      Logger.log(Logger.INFO, 'NotationRenderer', 'Cursor mapping complete', {
-        totalSteps: this.totalCursorSteps,
-        mappedNotes: this.timelineToStepMap.size,
+      
+      Logger.log(Logger.INFO, 'NotationRenderer', 'Using OSMD cursor for highlighting', {
         timelineLength: exercise.timeline.length
       });
-
-      // Warn if mapping coverage is low
-      if (this.timelineToStepMap.size < exercise.timeline.length * 0.8) {
-        Logger.log(Logger.WARN, 'NotationRenderer',
-          'Less than 80% of timeline notes mapped to cursor steps', {
-            mapped: this.timelineToStepMap.size,
-            total: exercise.timeline.length,
-            ratio: (this.timelineToStepMap.size / exercise.timeline.length * 100).toFixed(1) + '%'
-          });
-      }
-
+      
     } catch (error) {
       Logger.log(Logger.ERROR, 'NotationRenderer', 'Cursor initialization failed', {
         error: error.message,
         stack: error.stack
       });
-
-      // Fallback to DOM mapping
+      
+      // Fallback to simple approach
       this.cursorEnabled = false;
       this._buildElementMapFallback(exercise);
     }
-  }
-
-  /**
-   * Find timeline notes matching an OSMD voice entry
-   *
-   * Matches by:
-   * 1. Timestamp (within tolerance)
-   * 2. MIDI pitch
-   * 3. Staff number
-   *
-   * @private
-   */
-  _findTimelineNotesByVoiceEntry(timeline, sourceNote, voiceEntry) {
-    const matchingIds = [];
-
-    // Calculate timestamp from OSMD's Timestamp object
-    // Timestamp.RealValue is in quarter notes
-    const timestampQuarters = sourceNote.Timestamp.RealValue;
-
-    // Get tempo from exercise (or use default)
-    const tempo = this.currentExercise?.tempo || 120;
-    const msPerQuarter = 60000 / tempo;
-    const expectedTimestampMs = timestampQuarters * msPerQuarter;
-
-    // Tolerance: 50ms for timestamp matching
-    const timeToleranceMs = 50;
-
-    // Get MIDI pitch
-    const pitch = sourceNote.Pitch;
-    if (!pitch) return matchingIds;
-
-    const expectedMidi = pitch.getHalfTone();
-
-    // Get staff index (1-based in MusicXML, 0-based in OSMD)
-    const voiceStaffIndex = voiceEntry.ParentStaff?.idInMusicSheet;
-    const expectedStaff = voiceStaffIndex !== undefined ? voiceStaffIndex + 1 : null;
-
-    // Search timeline for matches
-    for (const note of timeline) {
-      // Skip rests
-      if (note.isRest) continue;
-
-      // Check timestamp match
-      const timeDiff = Math.abs(note.timestamp - expectedTimestampMs);
-      if (timeDiff > timeToleranceMs) continue;
-
-      // Check MIDI pitch match
-      if (note.midi !== expectedMidi) continue;
-
-      // Check staff match (if available)
-      if (expectedStaff !== null && note.staff !== expectedStaff) continue;
-
-      matchingIds.push(note.id);
-    }
-
-    return matchingIds;
   }
 
   /**
@@ -496,7 +371,7 @@ class NotationRenderer extends EventEmitter {
 
   /**
    * Highlight specific notes in the notation using OSMD cursor
-   *
+   * 
    * @param {Array} noteIds - Array of note IDs to highlight
    * @param {string} className - CSS class name for highlighting
    */
@@ -504,80 +379,107 @@ class NotationRenderer extends EventEmitter {
     if (!Array.isArray(noteIds)) {
       noteIds = [noteIds];
     }
-
-    // Always clear previous highlights
+    
+    // Always clear previous highlights first
     this.clearHighlights();
-
-    // Use cursor if available
-    if (this.cursorEnabled && this.osmd.cursor) {
-      const noteId = noteIds[0]; // Primary note to highlight
-
-      // Get cursor step for this note
-      const targetStep = this.timelineToStepMap.get(noteId);
-
-      if (targetStep === undefined) {
-        Logger.log(Logger.WARN, 'NotationRenderer',
-          'Note not mapped to cursor step', { noteId });
-
+    
+    // Use OSMD cursor if enabled
+    if (this.cursorEnabled && this.osmd.cursor && this.cursorTimeline) {
+      const noteId = noteIds[0]; // Handle first note
+      const noteIndex = this._findNoteInTimeline(noteId);
+      
+      if (noteIndex === -1) {
+        Logger.log(Logger.WARN, 'NotationRenderer', 'Note not found in timeline', { noteId });
         // Fallback to manual highlighting
         this._manualHighlight(noteIds, className);
         return;
       }
-
-      // Jump to cursor step
-      this._jumpToCursorStep(targetStep);
-
-      Logger.log(Logger.DEBUG, 'NotationRenderer', 'Cursor moved to step', {
+      
+      // Skip cursor movement for rests - keep cursor on last note
+      const note = this.cursorTimeline[noteIndex];
+      if (note && note.isRest) {
+        Logger.log(Logger.DEBUG, 'NotationRenderer', 'Skipping cursor for rest', { noteId });
+        return;
+      }
+      
+      // Move cursor to this position
+      this._advanceCursorToNote(noteIndex);
+      
+      Logger.log(Logger.DEBUG, 'NotationRenderer', 'Cursor moved to note', {
         noteId,
-        targetStep,
-        totalSteps: this.totalCursorSteps,
-        progress: (targetStep / this.totalCursorSteps * 100).toFixed(1) + '%'
+        noteIndex,
+        cursorIndex: this.cursorIndex
       });
-
+      
       return;
     }
-
+    
     // Fallback to manual highlighting
     this._manualHighlight(noteIds, className);
   }
 
   /**
-   * Jump cursor to specific step index
-   *
-   * Based on osmd-audio-player's jumpToStep():
-   * https://cdn.jsdelivr.net/gh/ivine/osmd-audio-player@master/src/OSMDCursor.ts
-   *
-   * Strategy: reset if moving backward, then advance to target
-   *
+   * Find note in timeline by ID
+   * 
+   * @param {string} noteId - Note identifier to find
+   * @returns {number} Index of note in timeline, or -1 if not found
    * @private
    */
-  _jumpToCursorStep(targetStep) {
-    if (!this.osmd.cursor) return;
+  _findNoteInTimeline(noteId) {
+    if (!this.cursorTimeline || !Array.isArray(this.cursorTimeline)) {
+      Logger.log(Logger.WARN, 'NotationRenderer', 'Timeline not available for search');
+      return -1;
+    }
+    
+    return this.cursorTimeline.findIndex(note => note.id === noteId);
+  }
 
+
+
+  /**
+   * Advance OSMD cursor to specific note index
+   * 
+   * @param {number} noteIndex - Target note index in full timeline
+   * @private
+   */
+  _advanceCursorToNote(noteIndex) {
     try {
-      // Reset if moving backward
-      if (targetStep < this.currentCursorStep) {
+      // For dual notation (staff=1 + staff=2), we need to map timeline indices to visual positions
+      // Since each musical note appears twice (staff1 + staff2), we divide by 2 to get the visual position
+      const visualCursorPosition = Math.floor(noteIndex / 2);
+      
+      Logger.log(Logger.DEBUG, 'NotationRenderer', 'Advancing cursor to visual position', {
+        timelineNoteIndex: noteIndex,
+        visualCursorPosition,
+        noteId: this.cursorTimeline[noteIndex]?.id,
+        staff: this.cursorTimeline[noteIndex]?.staff
+      });
+      
+      // Handle backward movement by resetting
+      if (visualCursorPosition < this.cursorIndex) {
         this.osmd.cursor.reset();
-        this.currentCursorStep = 0;
+        this.cursorIndex = 0;
       }
-
-      // Advance to target step
-      while (this.currentCursorStep < targetStep &&
-             !this.osmd.cursor.iterator.EndReached) {
+      
+      // Advance cursor to correct visual position
+      while (this.cursorIndex < visualCursorPosition && this.osmd.cursor && !this.osmd.cursor.iterator.EndReached) {
         this.osmd.cursor.next();
-        this.currentCursorStep++;
+        this.cursorIndex++;
       }
-
-      // Ensure cursor is visible
-      this.osmd.cursor.show();
-
+      
+      // Show cursor at current position
+      if (this.osmd.cursor) {
+        this.osmd.cursor.show();
+      }
+      
     } catch (error) {
-      Logger.log(Logger.ERROR, 'NotationRenderer',
-        'Cursor jump failed', {
-          error: error.message,
-          targetStep,
-          currentStep: this.currentCursorStep
-        });
+      Logger.log(Logger.ERROR, 'NotationRenderer', 'Cursor advancement failed', {
+        error: error.message,
+        noteIndex,
+        currentCursorIndex: this.cursorIndex
+      });
+      
+      // Don't throw - just log the error and fall back silently
     }
   }
 
@@ -712,22 +614,20 @@ class NotationRenderer extends EventEmitter {
         // Ignore cursor hide errors
       }
     }
-
+    
     if (this.containerElement) {
       this.containerElement.innerHTML = '';
     }
-
+    
     this.osmd = null;
     this.noteElementMap.clear();
-    this.timelineToStepMap.clear();      // NEW
-    this.stepToTimelineMap.clear();      // NEW
     this.currentExercise = null;
     this.isRendering = false;
     this.lastHighlightedNotes = [];
     this.cursorEnabled = false;
-    this.totalCursorSteps = 0;           // NEW
-    this.currentCursorStep = 0;          // NEW
-
+    this.cursorTimeline = null;
+    this.cursorIndex = 0;
+    
     Logger.log(Logger.INFO, 'NotationRenderer', 'Cleared');
   }
 }
