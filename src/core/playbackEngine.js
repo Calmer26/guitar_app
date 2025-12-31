@@ -76,6 +76,7 @@ class PlaybackEngine extends EventEmitter {
     this.synthesizer = null;
     this.sampler = null;
     this.metronome = null;
+    this.drumMachine = null;
     // Normalize instrument mode to handle both "samples" and "sample"
     const mode = this.config.instrumentMode || 'synth';
     this.currentInstrumentMode = mode === 'samples' ? 'sample' : mode;
@@ -194,9 +195,10 @@ class PlaybackEngine extends EventEmitter {
       }
 
       // Ensure global Transport starts from a clean state
+      // NOTE: Don't use cancel() as it clears ALL events including drum events
       if (Tone && Tone.Transport) {
         Tone.Transport.stop();
-        Tone.Transport.cancel();
+        // Only reset position, preserve all scheduled events (including drums)
         Tone.Transport.position = 0;
       }
 
@@ -601,14 +603,13 @@ class PlaybackEngine extends EventEmitter {
    */
   _clearScheduledEvents() {
     if (Tone && Tone.Transport) {
-      // Remove any events this instance knows about
+      // Only clear PlaybackEngine's own events, NOT drum events
       this.scheduledEvents.forEach(eventId => {
         Tone.Transport.clear(eventId);
       });
 
-      // Extra safety, remove all events from the global Transport
-      // in case older PlaybackEngine instances left events behind
-      Tone.Transport.cancel();
+      // Reset Transport position but DON'T cancel all events
+      // This preserves drum events scheduled by DrumMachine
       Tone.Transport.position = 0;
     }
 
@@ -618,7 +619,7 @@ class PlaybackEngine extends EventEmitter {
     Logger.log(
       Logger.DEBUG,
       'PlaybackEngine',
-      'Cleared scheduled events and reset Transport'
+      'Cleared PlaybackEngine events (preserved drum events)'
     );
   }
 
@@ -1041,7 +1042,7 @@ class PlaybackEngine extends EventEmitter {
 
   /**
    * Play audio for note using current instrument mode
-   * 
+   *
    * @param {Object} note - Note to play
    * @param {number} time - Web Audio context time
    * @private
@@ -1053,8 +1054,11 @@ class PlaybackEngine extends EventEmitter {
       } else if (this.currentInstrumentMode === 'sample') {
         this._triggerSampleNote(note, time);
       }
+
+      // NOTE: Drums are now scheduled independently via DrumMachine.scheduleDrums()
+      // They should NOT be triggered by individual note playback
     } catch (error) {
-      Logger.log(Logger.ERROR, 'PlaybackEngine', 
+      Logger.log(Logger.ERROR, 'PlaybackEngine',
         'Audio playback error', { error, noteId: note.id });
     }
   }
@@ -1364,8 +1368,21 @@ class PlaybackEngine extends EventEmitter {
   }
 
   /**
+   * Set drum machine for jamming mode
+   *
+   * @param {DrumMachine} drumMachine - Drum machine instance
+   */
+  setDrumMachine(drumMachine) {
+    this.drumMachine = drumMachine;
+    Logger.log(Logger.INFO, 'PlaybackEngine', 'Drum machine set for jamming mode', {
+      drumMachineReady: drumMachine ? drumMachine.isReady() : false,
+      drumMachineStyle: drumMachine ? drumMachine.getCurrentStyle() : 'none'
+    });
+  }
+
+  /**
    * Get sample path for MIDI note
-   * 
+   *
    * @param {number} midiNote - MIDI note number
    * @returns {string} Sample file path
    * @private

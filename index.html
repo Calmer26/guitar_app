@@ -36,6 +36,7 @@
   <nav class="tab-navigation">
     <button class="tab-btn active" data-tab="practice">Practice</button>
     <button class="tab-btn" data-tab="tuner">Tuner</button>
+    <button class="tab-btn" data-tab="jamming">Jamming</button>
     <button class="tab-btn" data-tab="lessons">Lessons</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
   </nav>
@@ -317,6 +318,81 @@
                    value="20" 
                    step="1"/>
             <span id="tuner-smoothing-value">0.20</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- Jamming Tab -->
+    <section id="jamming-tab" class="tab-content">
+      <div class="jamming-header">
+        <h2>Jam Along</h2>
+        <p>Play along with drum accompaniment</p>
+      </div>
+
+      <div class="jamming-controls">
+        <!-- Drum Style Selector -->
+        <div class="control-group">
+          <label for="drum-style-select">Drum Style</label>
+          <select id="drum-style-select">
+            <option value="rock">Rock</option>
+            <option value="jazz">Jazz (Swing)</option>
+            <option value="latin">Latin</option>
+            <option value="ballad">Ballad</option>
+            <option value="funk">Funk</option>
+            <option value="waltz">Waltz (3/4)</option>
+            <option value="reggae">Reggae</option>
+            <option value="blues">Blues Shuffle</option>
+            <option value="pop">Pop</option>
+          </select>
+        </div>
+
+        <!-- Drum Volume -->
+        <div class="control-group">
+          <label for="drum-volume">Drum Volume</label>
+          <input type="range" id="drum-volume" min="0" max="100" value="60">
+          <span id="drum-volume-display">60%</span>
+        </div>
+
+        <!-- Playback Controls -->
+        <div class="playback-controls">
+          <button id="jam-play-btn" class="btn btn-primary">
+            <i class="icon-play"></i> Play
+          </button>
+          <button id="jam-pause-btn" class="btn">
+            <i class="icon-pause"></i> Pause
+          </button>
+          <button id="jam-stop-btn" class="btn">
+            <i class="icon-stop"></i> Stop
+          </button>
+        </div>
+
+        <!-- Tempo Control -->
+        <div class="control-group">
+          <label for="jam-tempo-slider">Tempo</label>
+          <input type="range" id="jam-tempo-slider" min="60" max="200" value="120">
+          <span id="jam-tempo-display">120 BPM</span>
+        </div>
+      </div>
+
+      <!-- Beat Indicator -->
+      <div class="beat-indicator">
+        <div class="beat-light" data-beat="1"></div>
+        <div class="beat-light" data-beat="2"></div>
+        <div class="beat-light" data-beat="3"></div>
+        <div class="beat-light" data-beat="4"></div>
+      </div>
+
+      <!-- Countdown Display -->
+      <div id="jam-countdown" class="countdown-number" style="display: none;">2</div>
+
+      <!-- Notation Display -->
+      <div class="notation-container" id="jam-notation">
+        <div class="loading-placeholder">
+          <p>Load an exercise to start jamming</p>
+          <input type="file" id="exerciseFileJamming" accept=".xml,.musicxml" class="file-input">
+          <label for="exerciseFileJamming" class="btn btn-primary">
+            📁 Upload MusicXML File
           </label>
         </div>
       </div>

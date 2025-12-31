@@ -54,7 +54,13 @@ class NotationRenderer extends EventEmitter {
     this.isRendering = false;
     this.currentExercise = null;
     this.lastHighlightedNotes = [];
-    
+
+    // Cursor state tracking
+    this.cursorEnabled = false;
+    this.cursorTimeline = null;
+    this.cursorIndex = 0;
+    this.lastRenderedNoteIndex = -1;  // Track which timeline note we last rendered
+
     // Performance monitoring
     this.renderStartTime = null;
   }
@@ -182,9 +188,8 @@ class NotationRenderer extends EventEmitter {
       // Store timeline for cursor control
       this.cursorTimeline = exercise.timeline;
       this.cursorIndex = 0;
-      
+      this.lastRenderedNoteIndex = -1;  // ✅ ADD: Reset cursor state
 
-      
       // Initialize OSMD cursor
       if (!this.osmd.cursor) {
         this.osmd.cursor = new opensheetmusicdisplay.Cursor(
@@ -437,55 +442,229 @@ class NotationRenderer extends EventEmitter {
 
 
   /**
-   * Advance OSMD cursor to specific note index
-   * 
+   * Advance OSMD cursor to specific timeline note index
+   * Handles both single-staff and dual-staff files using visual note positions
+   *
    * @param {number} noteIndex - Target note index in full timeline
    * @private
    */
   _advanceCursorToNote(noteIndex) {
     try {
-      // For dual notation (staff=1 + staff=2), we need to map timeline indices to visual positions
-      // Since each musical note appears twice (staff1 + staff2), we divide by 2 to get the visual position
-      const visualCursorPosition = Math.floor(noteIndex / 2);
-      
-      Logger.log(Logger.DEBUG, 'NotationRenderer', 'Advancing cursor to visual position', {
-        timelineNoteIndex: noteIndex,
-        visualCursorPosition,
-        noteId: this.cursorTimeline[noteIndex]?.id,
-        staff: this.cursorTimeline[noteIndex]?.staff
+      const targetNote = this.cursorTimeline[noteIndex];
+      if (!targetNote || targetNote.isRest) {
+        // Skip rests - don't move cursor for rest notes
+        return;
+      }
+
+      // Determine if this is a dual-staff file (timeline length suggests 2:1 ratio)
+      const isDualStaff = this._isDualStaffFile();
+
+      // Convert timeline indices to visual note positions
+      // For dual-staff: each musical note appears twice, so use floor division
+      // For single-staff: timeline index equals visual position
+      const currentVisualPosition = isDualStaff ?
+        Math.floor(this.lastRenderedNoteIndex / 2) : this.lastRenderedNoteIndex;
+      const targetVisualPosition = isDualStaff ?
+        Math.floor(noteIndex / 2) : noteIndex;
+
+      Logger.log(Logger.DEBUG, 'NotationRenderer', 'Cursor advancement calculation', {
+        noteId: targetNote.id,
+        noteIndex,
+        lastRenderedNoteIndex: this.lastRenderedNoteIndex,
+        isDualStaff,
+        currentVisualPosition,
+        targetVisualPosition,
+        // Show timeline context around target note
+        timelineContext: this.cursorTimeline.slice(Math.max(0, noteIndex - 2), noteIndex + 3).map((note, i) => ({
+          relativeIndex: i - 2,
+          index: noteIndex - 2 + i,
+          id: note?.id,
+          isRest: note?.isRest,
+          pitch: note?.pitch ? `${note.pitch.step}${note.pitch.octave}` : null
+        }))
       });
-      
-      // Handle backward movement by resetting
-      if (visualCursorPosition < this.cursorIndex) {
+
+      // Check if we need to move backward (e.g., after seeking)
+      if (targetVisualPosition < currentVisualPosition) {
+        Logger.log(Logger.DEBUG, 'NotationRenderer', 'Resetting cursor for backward seek', {
+          from: this.lastRenderedNoteIndex,
+          to: noteIndex,
+          currentVisual: currentVisualPosition,
+          targetVisual: targetVisualPosition,
+          isDualStaff
+        });
         this.osmd.cursor.reset();
-        this.cursorIndex = 0;
+        this.lastRenderedNoteIndex = -1;
       }
-      
-      // Advance cursor to correct visual position
-      while (this.cursorIndex < visualCursorPosition && this.osmd.cursor && !this.osmd.cursor.iterator.EndReached) {
+
+      // Calculate how many visual steps to advance
+      const visualStepsToAdvance = targetVisualPosition - Math.max(0, currentVisualPosition);
+
+      Logger.log(Logger.DEBUG, 'NotationRenderer', 'Visual steps calculation', {
+        currentVisualPosition: Math.max(0, currentVisualPosition),
+        targetVisualPosition,
+        visualStepsToAdvance,
+        isDualStaff
+      });
+
+      if (visualStepsToAdvance === 0) {
+        // Already at correct position
+        return;
+      }
+
+      // Advance cursor the calculated number of visual steps
+      let steps = 0;
+      const maxIterations = visualStepsToAdvance + 10; // Safety margin
+      let iterations = 0;
+
+      while (steps < visualStepsToAdvance &&
+             !this.osmd.cursor.iterator.EndReached &&
+             iterations < maxIterations) {
+
         this.osmd.cursor.next();
-        this.cursorIndex++;
+        steps++;
+        iterations++;
       }
-      
-      // Show cursor at current position
-      if (this.osmd.cursor) {
-        this.osmd.cursor.show();
-      }
-      
+
+      // Update tracking
+      this.lastRenderedNoteIndex = noteIndex;
+      this.osmd.cursor.show();
+
+      Logger.log(Logger.DEBUG, 'NotationRenderer', 'Cursor advanced', {
+        noteId: targetNote.id,
+        noteIndex,
+        visualPosition: targetVisualPosition,
+        stepsAdvanced: steps,
+        iterations,
+        isDualStaff
+      });
+
     } catch (error) {
       Logger.log(Logger.ERROR, 'NotationRenderer', 'Cursor advancement failed', {
         error: error.message,
         noteIndex,
-        currentCursorIndex: this.cursorIndex
+        lastRenderedNoteIndex: this.lastRenderedNoteIndex
       });
-      
-      // Don't throw - just log the error and fall back silently
     }
   }
 
   /**
+   * Determine if the current file is dual-staff based on timeline pattern
+   * Dual-staff files have each musical note appearing twice (staff 1 + staff 2)
+   *
+   * @returns {boolean} True if dual-staff file detected
+   * @private
+   */
+  _isDualStaffFile() {
+    if (!this.cursorTimeline || this.cursorTimeline.length < 4) {
+      return false; // Too small to determine pattern
+    }
+
+    // Method 1: Check for perfect alternating staff pattern (1,2,1,2,1,2...)
+    // This is more reliable than ratio-based detection
+    const isAlternatingPattern = this._hasAlternatingStaffPattern();
+
+    // Method 2: Check ratio of timeline length to unique musical notes
+    // Count unique note positions (accounting for dual-staff duplication)
+    const uniqueNotes = new Set();
+    this.cursorTimeline.forEach(note => {
+      if (note && !note.isRest && note.pitch) {
+        // Create a unique key for each musical note (ignoring staff)
+        const key = `${note.pitch.step}${note.pitch.octave}`;
+        uniqueNotes.add(key);
+      }
+    });
+
+    const ratio = this.cursorTimeline.length / uniqueNotes.size;
+    const isDualStaffByRatio = ratio >= 1.8 && ratio <= 2.2;
+
+    // Use alternating pattern as primary detection, ratio as backup
+    const isDualStaff = isAlternatingPattern || isDualStaffByRatio;
+
+    Logger.log(Logger.DEBUG, 'NotationRenderer', 'Dual-staff detection', {
+      timelineLength: this.cursorTimeline.length,
+      uniqueNotes: uniqueNotes.size,
+      ratio: ratio.toFixed(2),
+      isAlternatingPattern,
+      isDualStaffByRatio,
+      isDualStaff,
+      // Add detailed timeline analysis
+      first10Notes: this.cursorTimeline.slice(0, 10).map((note, i) => ({
+        index: i,
+        id: note?.id,
+        isRest: note?.isRest,
+        pitch: note?.pitch ? `${note.pitch.step}${note.pitch.octave}` : null
+      }))
+    });
+
+    return isDualStaff;
+  }
+
+  /**
+   * Check if timeline follows alternating staff pattern (1,2,1,2,1,2...)
+   *
+   * @returns {boolean} True if alternating staff pattern detected
+   * @private
+   */
+  _hasAlternatingStaffPattern() {
+    if (!this.cursorTimeline || this.cursorTimeline.length < 4) {
+      return false;
+    }
+
+    // Check first 10 notes for alternating pattern
+    const checkLength = Math.min(10, this.cursorTimeline.length);
+    let alternatingCount = 0;
+
+    for (let i = 0; i < checkLength - 1; i++) {
+      const currentNote = this.cursorTimeline[i];
+      const nextNote = this.cursorTimeline[i + 1];
+
+      if (currentNote && nextNote && !currentNote.isRest && !nextNote.isRest) {
+        // Check if staffs alternate (1->2 or 2->1)
+        const currentStaff = currentNote.staff;
+        const nextStaff = nextNote.staff;
+
+        if ((currentStaff === 1 && nextStaff === 2) ||
+            (currentStaff === 2 && nextStaff === 1)) {
+          alternatingCount++;
+        }
+      }
+    }
+
+    // Consider it alternating if at least 80% of consecutive pairs alternate
+    const alternatingRatio = alternatingCount / (checkLength - 1);
+    return alternatingRatio >= 0.8;
+  }
+
+  /**
+   * Count non-rest notes in timeline between two indices
+   * Used to calculate cursor advancement steps
+   *
+   * @param {number} startIndex - Start index (exclusive)
+   * @param {number} endIndex - End index (inclusive)
+   * @returns {number} Count of non-rest notes
+   * @private
+   */
+  _countNonRestNotes(startIndex, endIndex) {
+    if (!this.cursorTimeline) return 0;
+
+    let count = 0;
+    const start = Math.max(0, startIndex);
+    const end = Math.min(this.cursorTimeline.length - 1, endIndex);
+
+    for (let i = start; i <= end; i++) {
+      const note = this.cursorTimeline[i];
+      if (note && !note.isRest) {
+        count++;
+      }
+    }
+
+    return count;
+  }
+
+  /**
    * Manual highlighting fallback using DOM element mapping
-   * 
+   *
    * @param {Array} noteIds - Array of note IDs to highlight
    * @param {string} className - CSS class name for highlighting
    * @private
@@ -627,7 +806,8 @@ class NotationRenderer extends EventEmitter {
     this.cursorEnabled = false;
     this.cursorTimeline = null;
     this.cursorIndex = 0;
-    
+    this.lastRenderedNoteIndex = -1;  // ✅ ADD: Reset cursor state
+
     Logger.log(Logger.INFO, 'NotationRenderer', 'Cleared');
   }
 }

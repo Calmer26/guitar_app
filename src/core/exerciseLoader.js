@@ -67,6 +67,14 @@ class ExerciseLoader extends EventEmitter {
       // Parse time signature
       const timeSignature = this._parseTimeSignature(xmlDoc);
       
+      // Get divisions from first measure
+      const firstMeasure = xmlDoc.querySelector('measure[number="1"]');
+      const divisionsElement = firstMeasure?.querySelector('attributes > divisions');
+      const divisions = divisionsElement ? parseInt(divisionsElement.textContent, 10) : 1;
+      
+      // Detect upbeat (anacrusis)
+      const upbeatInfo = this._detectUpbeat(xmlDoc, divisions, timeSignature);
+      
       // Extract tuning
       const tuning = this._extractTuning(xmlDoc);
       
@@ -94,6 +102,7 @@ class ExerciseLoader extends EventEmitter {
         composer: metadata.composer,
         tempo: metadata.tempo,
         timeSignature,
+        upbeat: upbeatInfo, // NEW: Upbeat information
         tuning,
         timeline,
         osmdInput: xmlContent, // Preserve complete MusicXML
@@ -349,6 +358,75 @@ class ExerciseLoader extends EventEmitter {
     }
     
     return { title, composer, tempo };
+  }
+
+  /**
+   * Detect if first measure is an upbeat (anacrusis)
+   * 
+   * @param {Document} xmlDoc - Parsed XML document
+   * @param {number} divisions - Divisions per quarter note
+   * @param {Object} timeSignature - Time signature object
+   * @returns {Object} Upbeat info: { hasUpbeat: boolean, upbeatBeats: number, startBeat: number }
+   * @private
+   */
+  _detectUpbeat(xmlDoc, divisions, timeSignature) {
+    const firstMeasure = xmlDoc.querySelector('measure[number="1"]');
+    if (!firstMeasure) {
+      return { hasUpbeat: false, upbeatBeats: 0, startBeat: 1 };
+    }
+    
+    // Calculate total duration of notes in first measure
+    let totalDuration = 0;
+    const notes = firstMeasure.querySelectorAll('note');
+    
+    notes.forEach(noteElement => {
+      // Only count notes from staff 1 (notation staff)
+      const staffElement = noteElement.querySelector('staff');
+      const staff = staffElement ? parseInt(staffElement.textContent, 10) : 1;
+      
+      if (staff === 1) {
+        const durationElement = noteElement.querySelector('duration');
+        if (durationElement) {
+          totalDuration += parseInt(durationElement.textContent, 10);
+        }
+      }
+    });
+    
+    // Calculate expected full measure duration
+    const fullMeasureDuration = divisions * timeSignature.beats;
+    
+    Logger.log(Logger.DEBUG, 'ExerciseLoader', 'Upbeat detection', {
+      totalDuration,
+      fullMeasureDuration,
+      divisions,
+      timeSignatureBeats: timeSignature.beats
+    });
+    
+    // If first measure is incomplete, it's an upbeat
+    if (totalDuration < fullMeasureDuration && totalDuration > 0) {
+      const upbeatDuration = totalDuration;
+      const upbeatBeats = upbeatDuration / divisions;
+      const startBeat = timeSignature.beats - upbeatBeats + 1; // e.g., 4 - 2 + 1 = 3
+      
+      Logger.log(Logger.INFO, 'ExerciseLoader', 'Upbeat detected', {
+        upbeatDuration,
+        upbeatBeats,
+        startBeat: Math.ceil(startBeat),
+        fullMeasureDuration
+      });
+      
+      return {
+        hasUpbeat: true,
+        upbeatBeats,
+        startBeat: Math.ceil(startBeat),
+        upbeatDuration,
+        fullMeasureDuration
+      };
+    }
+    
+    Logger.log(Logger.DEBUG, 'ExerciseLoader', 'No upbeat detected');
+    
+    return { hasUpbeat: false, upbeatBeats: 0, startBeat: 1 };
   }
 
   /**

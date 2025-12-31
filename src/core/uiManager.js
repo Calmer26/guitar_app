@@ -127,7 +127,7 @@ export default class UIManager extends EventEmitter {
    * @returns {void}
    */
   switchTab(tabId) {
-    if (!['practice', 'tuner', 'lessons', 'settings'].includes(tabId)) {
+    if (!['practice', 'tuner', 'jamming', 'lessons', 'settings'].includes(tabId)) {
       Logger.log(Logger.WARN, 'UIManager', 'Invalid tab ID', { tabId });
       return;
     }
@@ -485,7 +485,7 @@ export default class UIManager extends EventEmitter {
       
       // Restore current tab
       const savedTab = localStorage.getItem('g4:ui-current-tab');
-      if (savedTab && ['practice', 'tuner', 'lessons', 'settings'].includes(savedTab)) {
+      if (savedTab && ['practice', 'tuner', 'jamming', 'lessons', 'settings'].includes(savedTab)) {
         this.currentTab = savedTab;
       }
       

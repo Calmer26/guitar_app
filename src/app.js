@@ -24,6 +24,7 @@ import { STORAGE_KEYS } from './utils/constants.js';
 import { PitchDetector } from './core/pitchDetector.js';
 import { Analyzer } from './core/analyzer.js';
 import { CalibrationManager } from './core/calibrationManager.js';
+import { DrumMachine } from './core/drumMachine.js';
 
 class App {
   constructor() {
@@ -34,6 +35,10 @@ class App {
     this.audioActivated = false;
     this.currentExercise = null;
     this.notificationTimeout = null;
+
+    // Jamming mode components
+    this.drumMachine = null;
+    this.jammingModeActive = false;
     
     // Practice mode components
     this.pitchDetector = null;
@@ -1438,7 +1443,7 @@ class App {
     if (tabName === 'practice') {
       // Practice tab is active - update calibration display
       this.updateCalibrationDisplay();
-      
+
       // Force notation container to redraw if exercise is loaded
       if (this.currentExercise && this.renderer) {
         const container = document.getElementById('notation-container');
@@ -1447,7 +1452,7 @@ class App {
           container.style.display = 'block';
           container.offsetHeight; // Force reflow
           container.style.display = '';
-          
+
           // If OSMD has a resize method, call it
           if (this.renderer.osmd && this.renderer.osmd.resize) {
             try {
@@ -1456,12 +1461,15 @@ class App {
               console.log('OSMD resize not available or failed:', error);
             }
           }
-          
+
           // Additional force redraw by triggering a window resize event
           // This should trigger OSMD's internal resize handlers
           window.dispatchEvent(new Event('resize'));
         }
       }
+    } else if (tabName === 'jamming') {
+      // Jamming tab is active - initialize drum machine if needed
+      this.initializeJammingMode();
     } else {
       // Other tabs are active - stop practice mode to save resources
       if (this.practiceModeEnabled) {
@@ -1469,6 +1477,415 @@ class App {
         if (micToggle) micToggle.checked = false;
         this.togglePracticeMode();
       }
+
+      // Stop jamming mode if switching away
+      if (this.jammingModeActive) {
+        this.jammingModeActive = false;
+        if (this.drumMachine) {
+          this.drumMachine._clearScheduledDrums();
+        }
+      }
+    }
+  }
+
+  /**
+   * Initialize jamming mode components
+   */
+  async initializeJammingMode() {
+    try {
+      // Initialize drum machine if not already done
+      if (!this.drumMachine) {
+        this.drumMachine = new DrumMachine({
+          drumVolume: 0.6,
+          accentStrength: 1.2
+        });
+        await this.drumMachine.initialize();
+
+        // Subscribe to drum events
+        this.drumMachine.on('drum:beat', (data) => {
+          this.updateBeatIndicator(data);
+        });
+
+        this.drumMachine.on('drum:styleChanged', (data) => {
+          this.showNotification(`Drum style: ${data.style}`, 'info');
+        });
+
+        this.drumMachine.on('drum:volumeChanged', (data) => {
+          const display = document.getElementById('drum-volume-display');
+          if (display) {
+            display.textContent = Math.round(data.volume * 100) + '%';
+          }
+        });
+      }
+
+      this.jammingModeActive = true;
+      console.log('🎵 Jamming mode initialized');
+
+    } catch (error) {
+      console.error('Failed to initialize jamming mode:', error);
+      this.showNotification('Failed to initialize jamming mode: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Setup jamming mode with current exercise
+   */
+  _setupJammingMode() {
+    if (!this.currentExercise || !this.drumMachine) return;
+
+    try {
+      // Set drum style
+      const drumStyle = this._getSelectedDrumStyle();
+      this.drumMachine.setStyle(drumStyle);
+
+      // Connect drum machine to playback engine for synchronized playback
+      if (this.engine) {
+        this.engine.setDrumMachine(this.drumMachine);
+        console.log('🥁 Drum machine connected to PlaybackEngine for synchronized jamming');
+      }
+
+      // Legacy: Schedule drums independently (kept for compatibility)
+      this.drumMachine.scheduleDrums(
+        this.currentExercise.timeline,
+        this.currentExercise.tempo,
+        this.currentExercise.timeSignature,
+        this.currentExercise.upbeat  // NEW: Pass upbeat info for beat calculation
+      );
+
+      console.log('🥁 Drums scheduled for jamming mode');
+
+    } catch (error) {
+      console.error('Failed to setup jamming mode:', error);
+      this.showNotification('Failed to setup drum accompaniment', 'error');
+    }
+  }
+
+  /**
+   * Get selected drum style from UI
+   */
+  _getSelectedDrumStyle() {
+    const selector = document.getElementById('drum-style-select');
+    return selector ? selector.value : 'rock';
+  }
+
+  /**
+   * Update beat indicator visual feedback
+   */
+  updateBeatIndicator(data) {
+    if (!this.jammingModeActive) return;
+
+    // Update beat lights (1-4)
+    const beatNumber = data.beatNumber || ((data.beat % 4) + 1);
+    for (let i = 1; i <= 4; i++) {
+      const light = document.querySelector(`.beat-light[data-beat="${i}"]`);
+      if (light) {
+        if (i === beatNumber) {
+          light.classList.add('active');
+          if (i === 1) light.classList.add('accent'); // Beat 1 gets accent
+        } else {
+          light.classList.remove('active', 'accent');
+        }
+      }
+    }
+  }
+
+  /**
+   * Handle jamming play button
+   */
+  async handleJamPlay() {
+    if (!this.engine) {
+      this.showNotification('Please load an exercise first', 'warning');
+      return;
+    }
+
+    if (!this.drumMachine || !this.drumMachine.isReady()) {
+      this.showNotification('Drum machine not ready', 'warning');
+      return;
+    }
+
+    try {
+      // Setup drums if not already done
+      if (this.currentExercise) {
+        this._setupJammingMode();
+      }
+
+      // Start countdown before playback
+      await this._startJammingCountdown();
+
+      // Start actual playback
+      await this.engine.play();
+      this.updateJammingButtonStates('playing');
+
+    } catch (error) {
+      console.error('Jamming play error:', error);
+      this.showNotification('Failed to start jamming: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Start countdown before jamming playback
+   * @private
+   */
+  async _startJammingCountdown() {
+    return new Promise((resolve) => {
+      const countdownDisplay = document.getElementById('jam-countdown');
+      const beatLights = document.querySelectorAll('.beat-light');
+
+      // Show countdown display
+      if (countdownDisplay) {
+        countdownDisplay.style.display = 'block';
+      }
+
+      // Disable controls during countdown
+      this.updateJammingButtonStates('countdown');
+
+      let count = 2; // 2-beat countdown
+      const countdownInterval = setInterval(() => {
+        // Update countdown display
+        if (countdownDisplay) {
+          countdownDisplay.textContent = count.toString();
+          countdownDisplay.className = 'countdown-number';
+        }
+
+        // Flash beat lights
+        beatLights.forEach((light, index) => {
+          if (index === (count - 1) % 4) {
+            light.classList.add('countdown-flash');
+            setTimeout(() => light.classList.remove('countdown-flash'), 200);
+          }
+        });
+
+        // Play metronome click
+        if (this.drumMachine) {
+          // Use snare for countdown clicks
+          this.drumMachine.snare.triggerAttackRelease('8n', Tone.now());
+        }
+
+        count--;
+
+        if (count < 0) {
+          clearInterval(countdownInterval);
+
+          // Hide countdown display
+          if (countdownDisplay) {
+            countdownDisplay.style.display = 'none';
+          }
+
+          // Small delay before starting playback
+          setTimeout(() => {
+            resolve();
+          }, 100);
+        }
+      }, 60000 / this.settings.tempo); // One beat duration
+    });
+  }
+
+  /**
+   * Handle jamming pause button
+   */
+  handleJamPause() {
+    if (this.engine) {
+      this.engine.pause();
+      this.updateJammingButtonStates('paused');
+    }
+  }
+
+  /**
+   * Handle jamming stop button
+   */
+  handleJamStop() {
+    if (this.engine) {
+      this.engine.stop();
+      this.updateJammingButtonStates('stopped');
+    }
+  }
+
+  /**
+   * Update jamming button states
+   */
+  updateJammingButtonStates(state) {
+    const playBtn = document.getElementById('jam-play-btn');
+    const pauseBtn = document.getElementById('jam-pause-btn');
+    const stopBtn = document.getElementById('jam-stop-btn');
+
+    switch (state) {
+      case 'playing':
+        if (playBtn) playBtn.disabled = true;
+        if (pauseBtn) pauseBtn.disabled = false;
+        if (stopBtn) stopBtn.disabled = false;
+        break;
+      case 'paused':
+        if (playBtn) playBtn.disabled = false;
+        if (pauseBtn) pauseBtn.disabled = true;
+        if (stopBtn) stopBtn.disabled = false;
+        break;
+      case 'stopped':
+        if (playBtn) playBtn.disabled = false;
+        if (pauseBtn) pauseBtn.disabled = true;
+        if (stopBtn) stopBtn.disabled = true;
+        break;
+    }
+  }
+
+  /**
+   * Handle drum style change
+   */
+  handleDrumStyleChange(event) {
+    const style = event.target.value;
+    if (this.drumMachine) {
+      this.drumMachine.setStyle(style);
+
+      // Re-schedule drums if currently playing
+      if (this.engine && this.engine.getState() === 'playing' && this.currentExercise) {
+        this._setupJammingMode();
+      }
+    }
+  }
+
+  /**
+   * Handle drum volume change
+   */
+  handleDrumVolumeChange(event) {
+    const volume = event.target.value / 100;
+    if (this.drumMachine) {
+      this.drumMachine.setVolume(volume);
+    }
+  }
+
+  /**
+   * Handle jamming tempo change
+   */
+  handleJamTempoChange(event) {
+    const bpm = parseInt(event.target.value);
+    const display = document.getElementById('jam-tempo-display');
+    if (display) {
+      display.textContent = bpm + ' BPM';
+    }
+
+    if (this.engine) {
+      this.engine.setTempo(bpm);
+
+      // Re-schedule drums with new tempo
+      if (this.drumMachine && this.currentExercise) {
+        this.drumMachine.scheduleDrums(
+          this.currentExercise.timeline,
+          bpm,
+          this.currentExercise.timeSignature,
+          this.currentExercise.upbeat  // NEW: Pass upbeat info for beat calculation
+        );
+      }
+    }
+  }
+
+  /**
+   * Handle jamming file upload
+   */
+  async handleJammingFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    console.log('🎵 Jamming file upload triggered:', file.name, file.type);
+
+    try {
+      const xmlContent = await this.readFileAsText(file);
+      console.log('📄 Jamming file read successfully, length:', xmlContent.length);
+
+      // Load the exercise for jamming
+      await this.loadJammingExercise(xmlContent, file.name);
+      console.log('✅ Exercise loaded successfully for jamming');
+
+    } catch (error) {
+      console.error('❌ Jamming file load error:', error);
+      this.showNotification('Failed to load jamming file: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Load exercise for jamming mode
+   */
+  async loadJammingExercise(xmlContent, exerciseName = 'Unknown') {
+    try {
+      // Parse exercise
+      const exercise = await this.loader.parseXML(xmlContent);
+      this.currentExercise = exercise;
+
+      // Determine which tempo to use based on user preference
+      const xmlTempo = exercise.tempo;
+      let playbackTempo = this.settings.tempo; // Default to user's tempo
+
+      if (this.settings.useXmlTempo) {
+        // Use XML tempo - update settings and UI
+        playbackTempo = xmlTempo;
+        this.settings.tempo = xmlTempo;
+        this.settingsManager.saveSettings(this.settings);
+        this.syncUIWithSettings();
+
+        // Update jamming tab tempo controls if they exist
+        const jamTempoSlider = document.getElementById('jam-tempo-slider');
+        const jamTempoDisplay = document.getElementById('jam-tempo-display');
+        if (jamTempoSlider) jamTempoSlider.value = xmlTempo;
+        if (jamTempoDisplay) jamTempoDisplay.textContent = xmlTempo + ' BPM';
+
+        this.showNotification(`Tempo set to ${xmlTempo} BPM from MusicXML`, 'info');
+      } else {
+        // Preserve user tempo - just notify about XML tempo
+        this.showNotification(`MusicXML specifies ${xmlTempo} BPM, using your setting: ${this.settings.tempo} BPM`, 'info');
+      }
+
+      // Render notation in jamming container
+      const container = document.getElementById('jam-notation');
+      if (container) {
+        // Clear previous content
+        container.innerHTML = '';
+
+        // Create a new div for OSMD
+        const notationDiv = document.createElement('div');
+        notationDiv.id = 'jamming-notation-renderer';
+        container.appendChild(notationDiv);
+
+        this.renderer = new NotationRenderer();
+        this.renderer.init(notationDiv);
+        await this.renderer.render(exercise);
+      }
+
+      // Create playback engine with appropriate tempo
+      this.engine = new PlaybackEngine(exercise.timeline, {
+        bpm: playbackTempo,
+        timeSignature: exercise.timeSignature,
+        instrument: document.getElementById('instrumentSelect').value,
+        instrumentMode: document.getElementById('instrumentMode').value
+      });
+
+      // Subscribe to engine events for cursor highlighting (CRITICAL FIX)
+      this.engine.on('playback:tick', (data) => {
+        if (this.renderer) {
+          this.renderer.clearHighlights();
+          this.renderer.highlightNotes([data.noteId], 'active');
+        }
+      });
+
+      this.engine.on('playback:completed', () => {
+        this.updateJammingButtonStates('stopped');
+        this.showNotification('Playback completed', 'success');
+      });
+
+      this.engine.on('playback:error', (data) => {
+        this.showNotification('Playback error: ' + data.error, 'error');
+      });
+
+      // Setup jamming mode
+      if (this.jammingModeActive) {
+        console.log('🎵 Setting up jamming mode for loaded exercise');
+        this._setupJammingMode();
+      }
+
+      console.log('🎵 Exercise loaded for jamming:', exercise.title || exerciseName);
+      this.showNotification(`Loaded for jamming: ${exercise.title || exerciseName}`, 'success');
+
+    } catch (error) {
+      console.error('Jamming exercise load error:', error);
+      this.showNotification('Failed to load exercise for jamming: ' + error.message, 'error');
+      throw error;
     }
   }
   
@@ -1682,6 +2099,24 @@ class App {
     document.querySelectorAll('.exercise-item .btn').forEach(button => {
       button.addEventListener('click', this.handleSampleExerciseLoad.bind(this));
     });
+
+    // Jamming tab controls
+    document.getElementById('jam-play-btn')?.addEventListener('click',
+      this.handleJamPlay.bind(this));
+    document.getElementById('jam-pause-btn')?.addEventListener('click',
+      this.handleJamPause.bind(this));
+    document.getElementById('jam-stop-btn')?.addEventListener('click',
+      this.handleJamStop.bind(this));
+    document.getElementById('drum-style-select')?.addEventListener('change',
+      this.handleDrumStyleChange.bind(this));
+    document.getElementById('drum-volume')?.addEventListener('input',
+      this.handleDrumVolumeChange.bind(this));
+    document.getElementById('jam-tempo-slider')?.addEventListener('input',
+      this.handleJamTempoChange.bind(this));
+
+    // Jamming tab file upload
+    document.getElementById('exerciseFileJamming')?.addEventListener('change',
+      this.handleJammingFileUpload.bind(this));
   }
   
   /**
@@ -2014,17 +2449,23 @@ class App {
       if (this.engine) {
         console.log('🔊 Audio context active - initializing PlaybackEngine audio components...');
         await this.engine.initializeAudio();
-        
+
         // Check if we're using samples and need to wait for them to load
         // FIX: Check the engine's actual currentInstrumentMode instead of settings
         if (this.engine.currentInstrumentMode === 'sample' && !this.engine.samplesLoaded) {
           console.log('⏳ Samples mode detected - waiting for samples to load after audio activation');
           this.disablePlayControls('Loading audio samples...');
-          
+
           // Wait for samples to load
           await this.waitForSamplesToLoad();
           this.enablePlayControls();
         }
+      }
+
+      // Reinitialize drum machine audio components if they exist
+      if (this.drumMachine) {
+        console.log('🥁 Audio context active - reinitializing DrumMachine audio components...');
+        await this.drumMachine.reinitializeAudio();
       }
 
       // Update UI
